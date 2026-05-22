@@ -36,8 +36,10 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config as C
+from common import regression_metrics, classification_metrics
 
 MODEL_FILES = {"baseline": "baseline", "xgboost": "xgb", "lstm": "lstm"}
+MIN_PROFILE_WINDOWS = 50            # skip a profile cell with too few test windows
 PRETTY      = {"baseline": "Baseline", "xgboost": "XGBoost", "lstm": "LSTM"}
 COLORS      = {"baseline": "#7f7f7f", "xgboost": "#1f77b4", "lstm": "#d62728"}
 DPI = 300
@@ -98,6 +100,44 @@ def print_table(df, title, fmt):
         return
     with pd.option_context("display.float_format", fmt):
         print(df.to_string(index=False).replace("\n", "\n  "))
+
+
+def build_per_profile_table(preds: dict) -> pd.DataFrame:
+    """Per-(model, horizon, profile) metrics, recomputed on the subset of test
+    windows belonging to machines of each behavioural profile.
+
+    Answers: do bursty / erratic VMs forecast worse than stable ones? — which is
+    a core discussion point for the paper.
+    """
+    if not preds:
+        return pd.DataFrame()
+    # machine-index -> profile string; identical across horizons, load once
+    w = np.load(C.WINDOWS_DIR / f"h{C.HORIZONS[0]}.npz", allow_pickle=True)
+    profiles = w["profiles"]
+
+    rows = []
+    for name, p in preds.items():
+        for H in C.HORIZONS:
+            if f"m_test_h{H}" not in p:
+                continue
+            prof = profiles[p[f"m_test_h{H}"]]
+            yreg_t, yreg_p = p[f"y_reg_h{H}"], p[f"reg_h{H}"]
+            yclf_t, proba  = p[f"y_clf_h{H}"], p[f"clf_proba_h{H}"]
+            for profile in sorted(set(prof.tolist())):
+                mask = prof == profile
+                n = int(mask.sum())
+                if n < MIN_PROFILE_WINDOWS:
+                    continue
+                rm = regression_metrics(yreg_t[mask], yreg_p[mask])
+                cm = classification_metrics(yclf_t[mask],
+                                            (proba[mask] >= 0.5).astype(int),
+                                            proba[mask])
+                rows.append({"model": PRETTY[name], "horizon_min": H,
+                             "profile": profile, "n_windows": n,
+                             "MAE": rm["mae"], "RMSE": rm["rmse"], "R2": rm["r2"],
+                             "F1": cm["f1"], "precision": cm["precision"],
+                             "recall": cm["recall"], "AUC_ROC": cm["auc_roc"]})
+    return pd.DataFrame(rows)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -235,6 +275,37 @@ def fig_confusion_matrix(res):
     _save(fig, "fig_confusion_matrix.png")
 
 
+def fig_metric_by_profile(prof_df):
+    """Grouped bars: per-VM-profile MAE and F1, one bar per model, at one horizon."""
+    if prof_df.empty:
+        return
+    H = 15 if 15 in C.HORIZONS else C.HORIZONS[0]
+    for metric, fname, title in [
+        ("MAE", "fig_mae_by_profile.png", "Test MAE by VM profile"),
+        ("F1",  "fig_f1_by_profile.png",  "Test F1 by VM profile"),
+    ]:
+        sub = prof_df[prof_df["horizon_min"] == H]
+        if sub.empty:
+            continue
+        profs  = sorted(sub["profile"].unique())
+        models = list(sub["model"].unique())
+        x = np.arange(len(profs))
+        width = 0.8 / max(len(models), 1)
+        fig, ax = plt.subplots(figsize=(7, 3.4))
+        for i, mdl in enumerate(models):
+            vals = [sub[(sub.model == mdl) & (sub.profile == pr)][metric].mean()
+                    for pr in profs]
+            key = [k for k, v in PRETTY.items() if v == mdl][0]
+            ax.bar(x + i * width, vals, width, label=mdl, color=COLORS.get(key))
+        ax.set_xticks(x + width * (len(models) - 1) / 2)
+        ax.set_xticklabels(profs, rotation=30, ha="right")
+        ax.set_ylabel(metric)
+        ax.set_title(f"{title}  (H={H} min)")
+        ax.legend(frameon=False)
+        ax.grid(alpha=0.3, axis="y")
+        _save(fig, fname)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 #  Markdown digest
 # ──────────────────────────────────────────────────────────────────────────────
@@ -249,13 +320,18 @@ def _as_md(df):
         return "```\n" + df.round(3).to_string(index=False) + "\n```"
 
 
-def write_markdown(reg_df, clf_df, res):
+def write_markdown(reg_df, clf_df, prof_df, res):
     lines = ["# Results digest\n"]
     lines.append("## Regression (test set)\n")
     lines.append(_as_md(reg_df))
     lines.append("\n\n## Classification (test set, tau = "
                  f"{C.CLASSIFICATION_THRESHOLD:.0f}% CPU)\n")
     lines.append(_as_md(clf_df))
+    if not prof_df.empty:
+        H0 = 15 if 15 in C.HORIZONS else C.HORIZONS[0]
+        lines.append(f"\n\n## Per-profile breakdown (test set, H={H0} min)\n")
+        lines.append(_as_md(prof_df[prof_df["horizon_min"] == H0]
+                            .drop(columns=["horizon_min"])))
     lines.append("\n\n## Run metadata\n")
     for name, r in res.items():
         lines.append(f"- **{PRETTY[name]}**: runtime "
@@ -287,16 +363,25 @@ def main():
     reg_df.to_csv(C.RESULTS_DIR / "comparison_regression.csv", index=False)
     clf_df.to_csv(C.RESULTS_DIR / "comparison_classification.csv", index=False)
 
+    prof_df = build_per_profile_table(preds)
+    prof_df.to_csv(C.RESULTS_DIR / "comparison_by_profile.csv", index=False)
+
     print_table(reg_df, "REGRESSION (test set)", "{:.3f}".format)
     print_table(clf_df, "CLASSIFICATION (test set)", "{:.3f}".format)
+    if not prof_df.empty:
+        H0 = 15 if 15 in C.HORIZONS else C.HORIZONS[0]
+        print_table(prof_df[prof_df["horizon_min"] == H0]
+                    .drop(columns=["horizon_min"]),
+                    f"PER-PROFILE (test set, H={H0} min)", "{:.3f}".format)
 
     print()
     fig_profile_distribution()
     fig_metric_vs_horizon(reg_df, clf_df)
+    fig_metric_by_profile(prof_df)
     fig_xgb_importance(res)
     fig_example_forecast(preds)
     fig_confusion_matrix(res)
-    write_markdown(reg_df, clf_df, res)
+    write_markdown(reg_df, clf_df, prof_df, res)
 
     print("\n  all outputs in:")
     print(f"    {C.RESULTS_DIR}")

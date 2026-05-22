@@ -12,10 +12,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR     = PROJECT_ROOT / "alibaba_processado"      # v2 outputs live here
 ARTIFACTS    = PROJECT_ROOT / "artifacts"
-WINDOWS_DIR  = ARTIFACTS / "windows"                    # preprocess.py output
-RESULTS_DIR  = ARTIFACTS / "results"                    # train_*.py metric JSONs
-MODELS_DIR   = ARTIFACTS / "models"                     # saved model checkpoints
-FIGURES_DIR  = ARTIFACTS / "figures"                    # plots for the paper
+# WINDOWS_DIR / RESULTS_DIR / MODELS_DIR / FIGURES_DIR are defined further down,
+# tagged by WINDOW_SIZE so different context lengths accumulate side by side.
 
 # Which selection to analyse (the paper focuses on forecasting)
 PRIMARY_DATASET = "forecasting"                         # general | forecasting | anomaly
@@ -41,8 +39,17 @@ TARGET_METRIC = "cpu_util_percent"                      # the variable we foreca
 
 # ── Windowing / horizons ───────────────────────────────────────────────────
 # On the 1-min grid, 1 step = 1 minute, so horizon (minutes) == horizon (steps).
-WINDOW_SIZE = 12                                        # 12 min of context
+WINDOW_SIZE = 12                                        # 12 min of context (try 30, 60)
 HORIZONS    = [5, 15, 30, 60]                           # minutes / steps ahead
+
+# Artifact directories are tagged by window size: a W=12 run writes to
+# artifacts/W12/..., a W=60 run to artifacts/W60/... — so context-length
+# experiments accumulate side by side instead of overwriting each other.
+_RUN_TAG     = f"W{WINDOW_SIZE}"
+WINDOWS_DIR  = ARTIFACTS / _RUN_TAG / "windows"         # preprocess.py output
+RESULTS_DIR  = ARTIFACTS / _RUN_TAG / "results"         # train_*.py metric JSONs
+MODELS_DIR   = ARTIFACTS / _RUN_TAG / "models"          # saved model checkpoints
+FIGURES_DIR  = ARTIFACTS / _RUN_TAG / "figures"         # plots for the paper
 
 # Binary classification: does the target metric exceed this threshold at t+H?
 CLASSIFICATION_THRESHOLD = 80.0                         # % CPU utilisation
