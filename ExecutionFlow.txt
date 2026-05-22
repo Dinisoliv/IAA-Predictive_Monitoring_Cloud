@@ -1,0 +1,32 @@
+# 1. Train all three models (each writes results/*.json + results/*_pred.npz)
+python ml_pipeline/train_baseline.py
+python ml_pipeline/train_xgb.py
+python ml_pipeline/train_lstm.py
+
+# 2. Build comparison tables + figures + per-profile breakdown
+python ml_pipeline/aggregate.py
+
+# 3. Post-hoc decision-threshold sweep (reads the *_pred.npz files)
+python ml_pipeline/tune_threshold.py
+
+=============================================================================
+
+Changed WINDOW_SIZE in config.py: 
+rerun preprocess.py first, then all three train scripts (new W-tag, nothing exists in that folder yet).
+
+=============================================================================
+
+Results File structure:
+artifacts/W12/
+├── results/
+│   ├── baseline.json  baseline_pred.npz
+│   ├── xgb.json       xgb_pred.npz
+│   ├── lstm.json      lstm_pred.npz
+│   ├── comparison_regression.csv
+│   ├── comparison_classification.csv
+│   ├── comparison_by_profile.csv
+│   ├── summary_for_paper.md
+│   ├── threshold_tuning.json
+│   └── threshold_tuning.md
+├── figures/   (7 plots from aggregate.py)
+└── models/    (saved checkpoints)

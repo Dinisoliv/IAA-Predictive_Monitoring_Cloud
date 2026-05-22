@@ -1,0 +1,15 @@
+# core — needed by every script
+pip install numpy pandas scikit-learn
+
+# xgboost (GPU support is built into the standard wheel, needs >= 2.0)
+pip install -U "xgboost>=2.0"
+
+# pytorch — CUDA build; swap cu121 to match the box (cu118 / cu124 etc.)
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# aggregate.py — figures + tables
+pip install matplotlib tabulate
+
+
+python -c "import torch; print('torch CUDA:', torch.cuda.is_available())"
+python -c "import xgboost; print('xgboost', xgboost.__version__)"
