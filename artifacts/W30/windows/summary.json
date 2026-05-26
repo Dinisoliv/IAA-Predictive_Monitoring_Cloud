@@ -1,0 +1,105 @@
+{
+  "input_csv": "C:\\Users\\dinis.aoliveira\\Desktop\\3_Alibaba_v2018\\alibaba_processado\\dataset_forecasting.csv",
+  "n_machines": 100,
+  "resample_s": 60,
+  "window_size": 30,
+  "horizons": [
+    5,
+    15,
+    30,
+    60
+  ],
+  "features": [
+    "cpu_util_percent",
+    "mem_util_percent",
+    "net_in",
+    "net_out",
+    "disk_io_percent"
+  ],
+  "target": "cpu_util_percent",
+  "clf_threshold": 80.0,
+  "scaler_min": [
+    0.0,
+    0.3333333333333333,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "scaler_max": [
+    97.0,
+    98.0,
+    75.47,
+    69.51,
+    100.0
+  ],
+  "per_horizon": {
+    "5": {
+      "train": {
+        "n_windows": 555943,
+        "clf_positive": 869,
+        "clf_positive_pct": 0.16
+      },
+      "val": {
+        "n_windows": 215576,
+        "clf_positive": 368,
+        "clf_positive_pct": 0.17
+      },
+      "test": {
+        "n_windows": 218883,
+        "clf_positive": 5257,
+        "clf_positive_pct": 2.4
+      }
+    },
+    "15": {
+      "train": {
+        "n_windows": 548230,
+        "clf_positive": 867,
+        "clf_positive_pct": 0.16
+      },
+      "val": {
+        "n_windows": 214454,
+        "clf_positive": 368,
+        "clf_positive_pct": 0.17
+      },
+      "test": {
+        "n_windows": 217883,
+        "clf_positive": 5257,
+        "clf_positive_pct": 2.41
+      }
+    },
+    "30": {
+      "train": {
+        "n_windows": 539935,
+        "clf_positive": 841,
+        "clf_positive_pct": 0.16
+      },
+      "val": {
+        "n_windows": 212856,
+        "clf_positive": 368,
+        "clf_positive_pct": 0.17
+      },
+      "test": {
+        "n_windows": 216383,
+        "clf_positive": 5257,
+        "clf_positive_pct": 2.43
+      }
+    },
+    "60": {
+      "train": {
+        "n_windows": 530619,
+        "clf_positive": 814,
+        "clf_positive_pct": 0.15
+      },
+      "val": {
+        "n_windows": 209700,
+        "clf_positive": 368,
+        "clf_positive_pct": 0.18
+      },
+      "test": {
+        "n_windows": 213383,
+        "clf_positive": 5257,
+        "clf_positive_pct": 2.46
+      }
+    }
+  }
+}

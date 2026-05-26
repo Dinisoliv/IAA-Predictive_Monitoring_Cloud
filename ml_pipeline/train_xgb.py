@@ -5,7 +5,13 @@ Primary non-sequential model. Same tabular feature vector as the baseline, so
 any gain over the baseline is the model, not the features.
   * 36-combo grid search (learning_rate / max_depth / subsample /
     colsample_bytree) with early stopping on the VALIDATION split.
-  * Regression     : XGBRegressor, picked by lowest validation RMSE.
+  * Regression     : XGBRegressor on the DELTA target (y_{t+H} - y_t),
+                     picked by lowest validation RMSE on the absolute scale
+                     (predictions are added back to the last observed value).
+                     Trees are piecewise-constant and cannot easily reproduce
+                     the near-identity mapping y_{t+H} ~= y_t that dominates
+                     CPU autocorrelation, so absolute-target trees collapse to
+                     the training mean. Residual learning fixes this.
   * Classification : XGBClassifier, scale_pos_weight = n_neg/n_pos, picked by F1.
   * Device         : auto-detects CUDA via torch; falls back to CPU.
   * Gain importances saved for the paper's feature-importance analysis.
@@ -42,6 +48,11 @@ def _detect_device():
 
 
 XGB_DEVICE = _detect_device()              # force "cuda" / "cpu" here if needed
+
+# Residual / delta-target regression: train trees to predict (y_{t+H} - y_t)
+# instead of y_{t+H} directly. Set False to fall back to absolute-target mode
+# for an ablation (don't do this in the final run — predictions collapse).
+DELTA_TARGET = True
 
 GRID = {
     "learning_rate":    [0.05, 0.1, 0.2],
@@ -118,8 +129,11 @@ def main():
         return float(np.sqrt(mean_squared_error(y_true, y_pred)))
 
     feat_names = tabular_feature_names(list(C.FEATURE_COLS), C.WINDOW_SIZE)
+    tgt_idx    = C.FEATURE_COLS.index(C.TARGET_METRIC)
     results = {"model": "xgboost", "window_size": C.WINDOW_SIZE,
-               "device": XGB_DEVICE, "grid": GRID, "horizons": {}}
+               "device": XGB_DEVICE, "grid": GRID,
+               "regression_target": "delta" if DELTA_TARGET else "absolute",
+               "horizons": {}}
     preds = {}
 
     for H in C.HORIZONS:
@@ -128,15 +142,41 @@ def main():
         Xva = extract_tabular_features(d["X_val"])
         Xte = extract_tabular_features(d["X_test"])
 
-        # regression - pick lowest validation RMSE
+        # Persistence = last observed raw CPU value per window. Windows are
+        # stored scaled, so inverse-transform via the saved scaler params.
+        smin = float(d["scaler_min"][tgt_idx])
+        smax = float(d["scaler_max"][tgt_idx])
+        span = (smax - smin) if (smax - smin) > 0 else 1.0
+        last_tr = d["X_train"][:, -1, tgt_idx].astype(np.float64) * span + smin
+        last_va = d["X_val"  ][:, -1, tgt_idx].astype(np.float64) * span + smin
+        last_te = d["X_test" ][:, -1, tgt_idx].astype(np.float64) * span + smin
+
+        # Train target depends on DELTA_TARGET; final metrics are always on the
+        # absolute scale so the comparison with baseline and LSTM stays honest.
+        if DELTA_TARGET:
+            ytr_reg = (d["y_reg_train"].astype(np.float64) - last_tr).astype(np.float32)
+            yva_reg = (d["y_reg_val"  ].astype(np.float64) - last_va).astype(np.float32)
+        else:
+            ytr_reg = d["y_reg_train"]
+            yva_reg = d["y_reg_val"]
+
+        # regression - pick lowest validation RMSE (on whichever target is used)
         reg_model, reg_params, _ = _grid_search(
-            xgb.XGBRegressor, Xtr, d["y_reg_train"], Xva, d["y_reg_val"],
+            xgb.XGBRegressor, Xtr, ytr_reg, Xva, yva_reg,
             score_fn=rmse, maximise=False,
             extra_params={"objective": "reg:squarederror"})
-        yhat = reg_model.predict(Xte)
+        raw_pred = reg_model.predict(Xte).astype(np.float64)
+        yhat = (last_te + raw_pred) if DELTA_TARGET else raw_pred
+        yhat = np.clip(yhat, 0.0, 100.0).astype(np.float32)  # CPU% is bounded
+
         reg_m = regression_metrics(d["y_reg_test"], yhat)
-        reg_m["best_params"] = {k: v for k, v in reg_params.items() if k in GRID}
+        reg_m["best_params"]       = {k: v for k, v in reg_params.items() if k in GRID}
         reg_m["best_n_estimators"] = int(reg_model.best_iteration + 1)
+        reg_m["target_mode"]       = "delta" if DELTA_TARGET else "absolute"
+        # persistence baseline (yhat = last observed value) for context
+        persist_m = regression_metrics(d["y_reg_test"], last_te)
+        reg_m["persistence_mae"]   = round(persist_m["mae"], 4)
+        reg_m["persistence_rmse"]  = round(persist_m["rmse"], 4)
         reg_m["feature_importance_gain"] = _named_importance(reg_model, feat_names)
 
         # classification - pick best validation F1

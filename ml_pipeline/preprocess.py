@@ -104,7 +104,7 @@ def interpolate_short_gaps(grid: pd.DataFrame) -> pd.DataFrame:
         isna = s.isna().to_numpy()
         if not isna.any():
             continue
-        filled = s.interpolate(method="linear", limit_area="inside").to_numpy()
+        filled = s.interpolate(method="linear", limit_area="inside").to_numpy(copy=True)
         long_gap = isna & (_nan_run_lengths(isna) > C.MAX_INTERP_GAP)
         filled[long_gap] = np.nan          # undo fills inside long gaps
         out[col] = filled
